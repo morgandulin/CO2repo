@@ -1,0 +1,282 @@
+cd('C:\Users\mkbroadb\Desktop\Spring 2020\BENG\Midterm')
+clc, clear all, close all
+%% import NEE Flux Data
+fname='NEE_FluxesForStudents.xlsx';
+sheetname='Flux';
+[num,txt]=xlsread(fname,sheetname);
+%must put each coumn into a vector in order to work with them in the
+%equations
+ 
+tString=txt(4:end,1);
+TotalPAR=num(:,1);
+Tair=num(:,2);
+Rh=num(:,3);
+co2_flux=num(:,4);
+%*** make similar columns for other variables
+%must convert the time from a string to a value to fix the 12:00 time stamp
+len=cellfun(@length,tString);
+small=find(len<12);
+
+for j=1:length(small)
+    tString{small(j)}=[tString{small(j)},' 12:00:00 AM'];
+end
+
+tStamp=datenum(tString,'mm/dd/yyyy HH:MM:SS AM');
+clear txt num len tString
+%% plot CO2 flux against PAR
+test=TotalPAR<350;
+TotalPAR2=TotalPAR(test);
+co2flux2=co2_flux(test);
+figure
+hold on
+plot(TotalPAR2, co2flux2,'o')
+plot(get(gca,'xlim'),[0 0],'-','color',[0.5 0.5 0.5])
+
+%% Question 1: model NEE flux using night and day separation using total PAR
+% Separate night and day data 
+nightvalues=TotalPAR<40 & isfinite(co2_flux) & co2_flux>0 & isfinite(Tair);
+
+% create variables for R_eco equation
+x=(0.016-(1./(Tair(nightvalues)+46.02)));
+y=log(co2_flux(nightvalues));
+
+% Use a moving window to find Rb and Eo that minimizes RMSE 
+days=unique(floor(tStamp));
+for i= 1:length(days);
+    today=floor(tStamp);
+    nightvals=TotalPAR<40 & isfinite(co2_flux) & co2_flux>0 & isfinite(Tair) & today<days(i)+7 & today>days(i)-7;
+   if sum(nightvals)<2
+       rblist(i)=NaN;
+   else
+    x_2=0.016-(1./(Tair(nightvals)+46.02));
+    y_2=log(co2_flux(nightvals));
+    t=today(nightvals);
+    p_2=polyfit(x_2,y_2,1);
+    Rb=exp(p_2(2));
+    Eo=p_2(1);
+    ymodel=polyval(p_2,x_2);
+    r=corrcoef(y_2,ymodel);
+    R2=(r(2)).^2;
+    mse=mean((y_2-ymodel).^2);
+    rmse=sqrt(mse);
+    rblist(i)=Rb;
+    Eolist(i)=Eo;
+    r2list(i)=R2;
+    rmselist(i)=rmse;
+   end   
+end
+
+
+%plot time series of rb, eo, r2, and rmse
+figure2=figure(2);
+subplot(2,2,1);
+scatter(days,rblist);
+datetick('x','mmm-yy');
+title('Rb over time');
+ylabel('Rb');
+xlabel('Time');
+
+
+subplot(2,2,2);
+scatter(days,Eolist);
+datetick('x','mmm-yy');
+title('Eo over time');
+ylabel('Eo');
+xlabel('Time');
+
+subplot(2,2,3);
+scatter(days,r2list);
+datetick('x','mmm-yy');
+title('R^2 over time');
+ylabel('R^2');
+xlabel('Time');
+
+subplot(2,2,4);
+scatter(days,rmselist);
+datetick('x','mmm-yy');
+title('RMSE over time');
+ylabel('RMSE');
+xlabel('Time');
+
+
+% change rblist and Eolist to 30 minute time intervals instead of day
+% intervals 
+for i=1:length(tStamp)
+    
+    use=days==floor(tStamp(i));
+    Rb_modify(i)=rblist(use);
+    Eo_modify(i)=Eolist(use);
+end
+ x_modify(i)=(0.016-(1./(Tair(i)+46.02)));
+ y_modify(i)=log(co2_flux(i));
+ 
+% Calculate Reco based on Rb and Eo lists
+Reco_night=Rb_modify.*exp(Eo_modify.*x_modify);
+
+% Plot Reco_night over time and compare it to co2_flux over time
+figure3=figure(3);
+subplot(2,1,1);
+scatter(tStamp,Reco_night);
+subplot(2,1,2);
+scatter(tStamp,co2_flux);
+
+%% Question 1 cont.
+% Calculate GPP 
+dayvalues=TotalPAR>40 & isfinite(co2_flux) & isfinite(Tair);
+GPP=co2_flux-Reco_night';
+ x_2=TotalPAR(dayvalues);
+ y_2=GPP(dayvalues)';
+% Use a moving widow to estimate GPP parameters with nlinfit to find alpha and beta 
+for i= 1:length(days);
+    today=floor(tStamp);
+    dayvals=TotalPAR>40 & isfinite(co2_flux) & co2_flux<0 & isfinite(Tair) & today<days(i)+7 & today>days(i)-7;
+    x_3=TotalPAR(dayvals);
+    y_3=GPP(dayvals)';
+    modelfun=@(b,x_3) ((b(1).*b(2).*x_3 )./(b(1).*x_3+b(2)));
+    beta0=[-.2,-60];
+    beta=nlinfit(x_3,y_3',modelfun,beta0);
+    beta1list(i)=beta(1);
+    beta2list(i)=beta(2);
+end
+% Change beta 1 and 2 list to 30 minute data from daily data
+for i=1:length(tStamp)
+    
+    use=floor(tStamp(i))==days;
+    beta1_modify(i)=beta1list(use);
+    beta2_modify(i)=beta2list(use);
+end
+
+% Calculate GPP and NEE for night time values 
+GPP_calculated=((beta1_modify'.*beta2_modify').*TotalPAR)./(beta1_modify'.*TotalPAR+beta2_modify');
+NEE_calculated=GPP_calculated+Reco_night';
+
+% Plot NEE over x and over PAR
+figure4=figure(4);
+subplot(2,1,1);
+hold on;
+scatter(tStamp,co2_flux);
+scatter(tStamp,NEE_calculated);
+
+subplot(2,1,2);
+hold on;
+scatter(TotalPAR, co2_flux);
+scatter(TotalPAR, NEE_calculated);
+
+%% Question 2
+seasonvalues=isfinite(TotalPAR) & isfinite(co2_flux) & isfinite(Tair);
+days=unique(floor(tStamp));
+for i= 1:length(days);
+    today=floor(tStamp);
+    seasonvals= isfinite(co2_flux) & isfinite(Tair) & today<days(i)+7 & today>days(i)-7;
+   if sum(seasonvals)<2
+       rblist(i)=NaN;
+   else
+    x_4=0.016-(1./(Tair(seasonvals)+46.02));
+    y_4=log(co2_flux(seasonvals));
+    t=today(seasonvals);
+    p_4=polyfit(x_4,y_4,1);
+    Rb=exp(p_2(2));
+    Eo=p_4(1);
+    ymodel=polyval(p_4,x_4);
+    rblist_season(i)=Rb;
+    Eolist_season(i)=Eo;
+    r2list_season(i)=R2;
+    rmselist_season(i)=rmse;
+   end   
+end
+% change rb and eo values to 30 minute intervals 
+for i=1:length(tStamp)
+    
+    use=days==floor(tStamp(i));
+    Rb_season(i)=rblist(use);
+    Eo_season(i)=Eolist(use);
+end
+ x_season(i)=(0.016-(1./(Tair(i)+46.02)));
+ y_season(i)=log(co2_flux(i));
+ 
+ % Calculate Reco based on Rb and Eo lists
+Reco_season=Rb_season.*exp(Eo_season.*x_season);
+
+% Plot Reco_night over time and compare it to co2_flux over time
+figure5=figure(5);
+subplot(2,1,1);
+scatter(tStamp,Reco_season);
+subplot(2,1,2);
+scatter(tStamp,co2_flux);
+
+%% Question 2 cont.
+% Calculate GPP 
+GPP2=co2_flux-Reco_season';
+ x_2=TotalPAR(seasonvalues);
+ y_2=GPP2(seasonvalues)';
+% Use a moving widow to estimate GPP parameters with nlinfit to find alpha and beta 
+for i= 1:length(days);
+    today=floor(tStamp);
+    seasonvals= isfinite(TotalPAR) & isfinite(co2_flux) & isfinite(Tair) & today<days(i)+7 & today>days(i)-7;
+    x_5=TotalPAR(seasonvals);
+    y_5=GPP2(seasonvals)';
+    modelfun=@(b,x_5) ((b(1).*b(2).*x_5 )./(b(1).*x_5+b(2)));
+    beta0_season=[-.2,-60];
+    beta=nlinfit(x_5,y_5',modelfun,beta0_season);
+    beta1list_season(i)=beta(1);
+    beta2list_season(i)=beta(2);
+end
+% Change beta 1 and 2 list to 30 minute data from daily data
+for i=1:length(tStamp)
+    
+    use=floor(tStamp(i))==days;
+    beta1_season(i)=beta1list_season(use);
+    beta2_season(i)=beta2list_season(use);
+end
+% Calculate GPP and NEE for night time values 
+GPP_season=((beta1_season'.*beta2_season').*TotalPAR)./(beta1_season'.*TotalPAR+beta2_season');
+NEE_season=GPP_season+Reco_season';
+
+% Plot NEE over x and over PAR
+figure6=figure(6);
+subplot(3,1,1);
+hold on;
+scatter(tStamp,co2_flux);
+scatter(tStamp,NEE_season);
+
+subplot(3,1,2);
+hold on;
+scatter(TotalPAR, co2_flux);
+scatter(TotalPAR, NEE_season);
+
+subplot(3,1,3);
+scatter(co2_flux, NEE_season);
+
+% Compare partioning and bulk methods by plotting 
+figure7=figure(7);
+subplot(4,1,1);
+hold on 
+scatter(tStamp, co2_flux);
+scatter(tStamp, NEE_calculated);
+
+subplot(4,1,2);
+hold on
+scatter(tStamp, co2_flux);
+scatter(tStamp, NEE_season);
+
+subplot(4,1,3);
+hold on
+scatter(co2_flux, NEE_calculated,'.');
+scatter(co2_flux, NEE_season,'.');
+
+subplot(4,1,4);
+scatter(NEE_calculated, NEE_season,'.');
+
+%% Question 3: examine the possibility of a diff variable influencing the model fit 
+
+% examine rh impact on the model
+figure8=figure(8);
+subplot(3,1,1);
+scatter(Rh,Reco_season);
+
+subplot(3,1,2);
+scatter(Rh, GPP_season);
+
+subplot(3,1,3);
+scatter(Rh, co2_flux);
+
