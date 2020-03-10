@@ -32,7 +32,7 @@ hold on
 plot(TotalPAR2, co2flux2,'o')
 plot(get(gca,'xlim'),[0 0],'-','color',[0.5 0.5 0.5])
 
-%% Question 1: model NEE flux using night and day separation using total PAR
+%% Part 1: model NEE flux using night and day separation using total PAR
 % Separate night and day data 
 nightvalues=TotalPAR<40 & isfinite(co2_flux) & co2_flux>0 & isfinite(Tair);
 
@@ -120,7 +120,7 @@ scatter(tStamp,Reco_night);
 subplot(2,1,2);
 scatter(tStamp,co2_flux);
 
-%% Question 1 cont.
+%% Part 1 cont.
 % Calculate GPP 
 dayvalues=TotalPAR>40 & isfinite(co2_flux) & isfinite(Tair);
 GPP=co2_flux-Reco_night';
@@ -150,7 +150,7 @@ end
 GPP_calculated=((beta1_modify'.*beta2_modify').*TotalPAR)./(beta1_modify'.*TotalPAR+beta2_modify');
 NEE_calculated=GPP_calculated+Reco_night';
 
-% Plot NEE over x and over PAR
+% Plot NEE over time and over PAR
 figure4=figure(4);
 subplot(2,1,1);
 hold on;
@@ -162,7 +162,8 @@ hold on;
 scatter(TotalPAR, co2_flux);
 scatter(TotalPAR, NEE_calculated);
 
-%% Question 2
+%% Part 2: gapfill NEE using bulk fitting method 
+% use a moving window to get Rb and Eo for Reco equation
 seasonvalues=isfinite(TotalPAR) & isfinite(co2_flux) & isfinite(Tair);
 days=unique(floor(tStamp));
 for i= 1:length(days);
@@ -204,7 +205,7 @@ scatter(tStamp,Reco_season);
 subplot(2,1,2);
 scatter(tStamp,co2_flux);
 
-%% Question 2 cont.
+%% Part 2 cont.
 % Calculate GPP 
 GPP2=co2_flux-Reco_season';
  x_2=TotalPAR(seasonvalues);
@@ -267,16 +268,4 @@ scatter(co2_flux, NEE_season,'.');
 subplot(4,1,4);
 scatter(NEE_calculated, NEE_season,'.');
 
-%% Question 3: examine the possibility of a diff variable influencing the model fit 
-
-% examine rh impact on the model
-figure8=figure(8);
-subplot(3,1,1);
-scatter(Rh,Reco_season);
-
-subplot(3,1,2);
-scatter(Rh, GPP_season);
-
-subplot(3,1,3);
-scatter(Rh, co2_flux);
 
